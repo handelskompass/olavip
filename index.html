@@ -6,6 +6,10 @@
 <title>OLAVIP</title>
 <meta name="theme-color" content="#070707">
 <link rel="stylesheet" href="./styles.css">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="OLAVIP">
 </head>
 <body>
 <header class="topbar">
@@ -290,6 +294,9 @@ async function loadUploadedProducts(){
 }
 loadUploadedProducts();
 validateAdmin();
+</script>
+<script>
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js"))}
 </script>
 </body>
 </html>
