@@ -23,7 +23,29 @@
 <div class="hero-card"><img src="./IMG-20261005-WA0003.jpg" alt="OLAVIP"></div>
 </section>
 
-<section class="upload-panel" id="add-product">
+
+<section class="admin-login" id="admin-login">
+  <div>
+    <p class="eyebrow">OLAVIP ADMIN</p>
+    <h2>دخول الإدارة</h2>
+    <p class="muted">إضافة المنتجات متاحة للأدمن فقط.</p>
+  </div>
+  <form id="adminLoginForm">
+    <label>البريد الإلكتروني
+      <input id="adminEmail" type="email" value="olavip42@gmail.com" readonly>
+    </label>
+    <label>كلمة المرور
+      <input id="adminPassword" type="password" placeholder="كلمة المرور" minlength="6" required>
+    </label>
+    <div class="admin-actions">
+      <button class="cta" type="submit">تسجيل الدخول</button>
+      <button class="secondary-btn" id="adminSignupButton" type="button">إنشاء الحساب لأول مرة</button>
+    </div>
+    <p id="adminStatus" class="muted"></p>
+  </form>
+</section>
+
+<section class="upload-panel" id="add-product" hidden>
   <div>
     <p class="eyebrow">إضافة منتج</p>
     <h2>صوّر المنتج أو اختر صورة</h2>
@@ -53,6 +75,7 @@
     <img id="previewImage" class="upload-preview" alt="" hidden>
     <button id="uploadButton" class="cta" type="submit">إضافة المنتج</button>
     <p id="uploadStatus" class="muted"></p>
+    <button id="adminLogoutButton" class="secondary-btn" type="button">تسجيل الخروج من الإدارة</button>
   </form>
 </section>
 <section class="section-head" id="products">
@@ -87,18 +110,106 @@
 <script>
 const SUPABASE_URL="https://avwrkvobehcjajomsljb.supabase.co";
 const SUPABASE_KEY="sb_publishable_GuS2EzDJrx1Cvp6mKlB_og_iz0LOaV8";
+const ADMIN_EMAIL="olavip42@gmail.com";
+
+const adminLogin=document.getElementById("admin-login");
+const adminForm=document.getElementById("adminLoginForm");
+const adminEmail=document.getElementById("adminEmail");
+const adminPassword=document.getElementById("adminPassword");
+const adminStatus=document.getElementById("adminStatus");
+const signupBtn=document.getElementById("adminSignupButton");
+const logoutBtn=document.getElementById("adminLogoutButton");
+const uploadPanel=document.getElementById("add-product");
 
 const fileInput=document.getElementById("productImage");
 const cameraInput=document.getElementById("cameraImage");
 let selectedFile=null;
+let accessToken=localStorage.getItem("olavip_admin_access_token")||"";
 const preview=document.getElementById("previewImage");
 const form=document.getElementById("uploadForm");
 const statusEl=document.getElementById("uploadStatus");
 const uploadBtn=document.getElementById("uploadButton");
 
+function setAdminUI(isAdmin){
+  uploadPanel.hidden=!isAdmin;
+  adminLogin.hidden=isAdmin;
+}
+
+async function validateAdmin(){
+  if(!accessToken){setAdminUI(false);return false;}
+  try{
+    const r=await fetch(SUPABASE_URL+"/auth/v1/user",{
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+accessToken}
+    });
+    if(!r.ok)throw new Error();
+    const user=await r.json();
+    const ok=(user.email||"").toLowerCase()===ADMIN_EMAIL;
+    setAdminUI(ok);
+    if(!ok){localStorage.removeItem("olavip_admin_access_token");accessToken="";}
+    return ok;
+  }catch(e){
+    localStorage.removeItem("olavip_admin_access_token");
+    accessToken="";
+    setAdminUI(false);
+    return false;
+  }
+}
+
+adminForm.addEventListener("submit",async(e)=>{
+  e.preventDefault();
+  adminStatus.textContent="جارٍ تسجيل الدخول...";
+  try{
+    const r=await fetch(SUPABASE_URL+"/auth/v1/token?grant_type=password",{
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({email:ADMIN_EMAIL,password:adminPassword.value})
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error_description||data.msg||"بيانات الدخول غير صحيحة");
+    accessToken=data.access_token;
+    localStorage.setItem("olavip_admin_access_token",accessToken);
+    adminPassword.value="";
+    adminStatus.textContent="";
+    await validateAdmin();
+  }catch(err){
+    adminStatus.textContent=err.message||"تعذر تسجيل الدخول";
+  }
+});
+
+signupBtn.addEventListener("click",async()=>{
+  if(adminPassword.value.length<6){adminStatus.textContent="اكتب كلمة مرور من 6 أحرف على الأقل.";return;}
+  adminStatus.textContent="جارٍ إنشاء حساب الأدمن...";
+  try{
+    const r=await fetch(SUPABASE_URL+"/auth/v1/signup",{
+      method:"POST",
+      headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+      body:JSON.stringify({email:ADMIN_EMAIL,password:adminPassword.value})
+    });
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.msg||"تعذر إنشاء الحساب");
+    if(data.access_token){
+      accessToken=data.access_token;
+      localStorage.setItem("olavip_admin_access_token",accessToken);
+      adminStatus.textContent="";
+      await validateAdmin();
+    }else{
+      adminStatus.textContent="تم إنشاء الحساب. افتح رسالة التأكيد في "+ADMIN_EMAIL+" ثم سجّل الدخول.";
+    }
+  }catch(err){
+    adminStatus.textContent=err.message||"تعذر إنشاء الحساب";
+  }
+});
+
+logoutBtn.addEventListener("click",()=>{
+  localStorage.removeItem("olavip_admin_access_token");
+  accessToken="";
+  setAdminUI(false);
+  window.scrollTo({top:0,behavior:"smooth"});
+});
+
 function chooseFile(input){
   const file=input.files && input.files[0];
-  if(!file){return;}
+  if(!file)return;
   selectedFile=file;
   preview.src=URL.createObjectURL(file);
   preview.hidden=false;
@@ -108,6 +219,7 @@ cameraInput.addEventListener("change",()=>chooseFile(cameraInput));
 
 form.addEventListener("submit",async(e)=>{
   e.preventDefault();
+  if(!(await validateAdmin())){statusEl.textContent="يجب تسجيل الدخول كأدمن أولاً.";return;}
   const file=selectedFile;
   if(!file){statusEl.textContent="اختر صورة من الكاميرا أو الصور أو الملفات أولاً.";return;}
   uploadBtn.disabled=true;
@@ -122,8 +234,8 @@ form.addEventListener("submit",async(e)=>{
       method:"POST",
       headers:{
         "apikey":SUPABASE_KEY,
-        "Authorization":"Bearer "+SUPABASE_KEY,
-        "Content-Type":file.type || "image/jpeg",
+        "Authorization":"Bearer "+accessToken,
+        "Content-Type":file.type||"image/jpeg",
         "x-upsert":"false"
       },
       body:file
@@ -135,7 +247,7 @@ form.addEventListener("submit",async(e)=>{
       method:"POST",
       headers:{
         "apikey":SUPABASE_KEY,
-        "Authorization":"Bearer "+SUPABASE_KEY,
+        "Authorization":"Bearer "+accessToken,
         "Content-Type":"application/json",
         "Prefer":"return=representation"
       },
@@ -149,7 +261,7 @@ form.addEventListener("submit",async(e)=>{
     preview.hidden=true;
     await loadUploadedProducts();
   }catch(err){
-    statusEl.textContent=err.message || "حدث خطأ أثناء الإضافة";
+    statusEl.textContent=err.message||"حدث خطأ أثناء الإضافة";
   }finally{
     uploadBtn.disabled=false;
   }
@@ -158,7 +270,7 @@ form.addEventListener("submit",async(e)=>{
 async function loadUploadedProducts(){
   try{
     const r=await fetch(SUPABASE_URL+"/rest/v1/olavip_products?select=*&order=created_at.desc",{
-      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
+      headers:{"apikey":SUPABASE_KEY}
     });
     if(!r.ok)return;
     const rows=await r.json();
@@ -177,6 +289,7 @@ async function loadUploadedProducts(){
   }catch(e){}
 }
 loadUploadedProducts();
+validateAdmin();
 </script>
 </body>
 </html>
