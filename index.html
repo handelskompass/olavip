@@ -22,6 +22,33 @@
 </div>
 <div class="hero-card"><img src="./IMG-20261005-WA0003.jpg" alt="OLAVIP"></div>
 </section>
+
+<section class="upload-panel" id="add-product">
+  <div>
+    <p class="eyebrow">إضافة منتج</p>
+    <h2>صوّر المنتج أو اختر صورة</h2>
+    <p class="muted">اختر النوع ثم التقط صورة بالكاميرا أو اختر صورة من الجهاز.</p>
+  </div>
+  <form id="uploadForm">
+    <label>اسم المنتج
+      <input id="productTitle" type="text" placeholder="مثال: حقيبة جلد" required>
+    </label>
+    <label>النوع
+      <select id="productCategory" required>
+        <option value="bags">حقائب</option>
+        <option value="accessories">إكسسوارات</option>
+        <option value="beauty">مكياج</option>
+        <option value="other">غير ذلك</option>
+      </select>
+    </label>
+    <label class="camera-pick">📷 كاميرا / اختيار صورة
+      <input id="productImage" type="file" accept="image/*" capture="environment" required>
+    </label>
+    <img id="previewImage" class="upload-preview" alt="" hidden>
+    <button id="uploadButton" class="cta" type="submit">إضافة المنتج</button>
+    <p id="uploadStatus" class="muted"></p>
+  </form>
+</section>
 <section class="section-head" id="products">
 <div><p class="eyebrow">المنتجات</p><h2>مجموعة OLAVIP</h2></div><span>23 منتج</span>
 </section>
@@ -50,5 +77,94 @@
 <article class="card"><img loading="lazy" src="./IMG-20261005-WA0025.jpg" alt="OLAVIP 23"><div class="card-body"><h3>OLAVIP 23</h3><div class="meta">OLAVIP Collection</div><div class="price">السعر عند الطلب</div></div></article></section>
 </main>
 <footer>© 2026 OLAVIP</footer>
+
+<script>
+const SUPABASE_URL="https://avwrkvobehcjajomsljb.supabase.co";
+const SUPABASE_KEY="sb_publishable_GuS2EzDJrx1Cvp6mKlB_og_iz0LOaV8";
+
+const fileInput=document.getElementById("productImage");
+const preview=document.getElementById("previewImage");
+const form=document.getElementById("uploadForm");
+const statusEl=document.getElementById("uploadStatus");
+const uploadBtn=document.getElementById("uploadButton");
+
+fileInput.addEventListener("change",()=>{
+  const file=fileInput.files && fileInput.files[0];
+  if(!file){preview.hidden=true;return;}
+  preview.src=URL.createObjectURL(file);
+  preview.hidden=false;
+});
+
+form.addEventListener("submit",async(e)=>{
+  e.preventDefault();
+  const file=fileInput.files && fileInput.files[0];
+  if(!file)return;
+  uploadBtn.disabled=true;
+  statusEl.textContent="جارٍ رفع الصورة...";
+  try{
+    const category=document.getElementById("productCategory").value;
+    const title=document.getElementById("productTitle").value.trim();
+    const ext=(file.name.split(".").pop()||"jpg").toLowerCase();
+    const name=Date.now()+"-"+Math.random().toString(36).slice(2)+"."+ext;
+
+    const up=await fetch(SUPABASE_URL+"/storage/v1/object/olavip-products/"+category+"/"+name,{
+      method:"POST",
+      headers:{
+        "apikey":SUPABASE_KEY,
+        "Authorization":"Bearer "+SUPABASE_KEY,
+        "Content-Type":file.type || "image/jpeg",
+        "x-upsert":"false"
+      },
+      body:file
+    });
+    if(!up.ok)throw new Error("تعذر رفع الصورة");
+
+    const imageUrl=SUPABASE_URL+"/storage/v1/object/public/olavip-products/"+category+"/"+name;
+    const ins=await fetch(SUPABASE_URL+"/rest/v1/olavip_products",{
+      method:"POST",
+      headers:{
+        "apikey":SUPABASE_KEY,
+        "Authorization":"Bearer "+SUPABASE_KEY,
+        "Content-Type":"application/json",
+        "Prefer":"return=representation"
+      },
+      body:JSON.stringify({title,category,image_url:imageUrl})
+    });
+    if(!ins.ok)throw new Error("تم رفع الصورة لكن تعذر حفظ المنتج");
+
+    statusEl.textContent="تمت إضافة المنتج بنجاح ✓";
+    form.reset();
+    preview.hidden=true;
+    await loadUploadedProducts();
+  }catch(err){
+    statusEl.textContent=err.message || "حدث خطأ أثناء الإضافة";
+  }finally{
+    uploadBtn.disabled=false;
+  }
+});
+
+async function loadUploadedProducts(){
+  try{
+    const r=await fetch(SUPABASE_URL+"/rest/v1/olavip_products?select=*&order=created_at.desc",{
+      headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+SUPABASE_KEY}
+    });
+    if(!r.ok)return;
+    const rows=await r.json();
+    document.querySelectorAll(".uploaded-card").forEach(x=>x.remove());
+    const grid=document.querySelector(".grid");
+    rows.forEach(p=>{
+      const a=document.createElement("article");
+      a.className="card uploaded-card";
+      a.dataset.category=p.category;
+      a.innerHTML='<img loading="lazy" src="'+p.image_url+'" alt=""><div class="card-body"><h3></h3><div class="meta"></div><div class="price">السعر عند الطلب</div></div>';
+      a.querySelector("h3").textContent=p.title;
+      const names={bags:"حقائب",accessories:"إكسسوارات",beauty:"مكياج",other:"غير ذلك"};
+      a.querySelector(".meta").textContent=names[p.category]||p.category;
+      grid.prepend(a);
+    });
+  }catch(e){}
+}
+loadUploadedProducts();
+</script>
 </body>
 </html>
