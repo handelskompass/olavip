@@ -41,9 +41,15 @@
         <option value="other">غير ذلك</option>
       </select>
     </label>
-    <label class="camera-pick">📷 كاميرا / اختيار صورة
-      <input id="productImage" type="file" accept="image/*" capture="environment" required>
-    </label>
+    <div class="upload-source">
+      <label class="camera-pick">📷 التقاط بالكاميرا
+        <input id="cameraImage" type="file" accept="image/*" capture="environment">
+      </label>
+      <label class="camera-pick">🖼️ اختيار من الصور أو الملفات
+        <input id="productImage" type="file" accept="image/*">
+      </label>
+    </div>
+    <p class="muted small-note">يمكنك اختيار صورة من المعرض أو من تطبيق «ملفاتي / Files» على الهاتف.</p>
     <img id="previewImage" class="upload-preview" alt="" hidden>
     <button id="uploadButton" class="cta" type="submit">إضافة المنتج</button>
     <p id="uploadStatus" class="muted"></p>
@@ -83,22 +89,27 @@ const SUPABASE_URL="https://avwrkvobehcjajomsljb.supabase.co";
 const SUPABASE_KEY="sb_publishable_GuS2EzDJrx1Cvp6mKlB_og_iz0LOaV8";
 
 const fileInput=document.getElementById("productImage");
+const cameraInput=document.getElementById("cameraImage");
+let selectedFile=null;
 const preview=document.getElementById("previewImage");
 const form=document.getElementById("uploadForm");
 const statusEl=document.getElementById("uploadStatus");
 const uploadBtn=document.getElementById("uploadButton");
 
-fileInput.addEventListener("change",()=>{
-  const file=fileInput.files && fileInput.files[0];
-  if(!file){preview.hidden=true;return;}
+function chooseFile(input){
+  const file=input.files && input.files[0];
+  if(!file){return;}
+  selectedFile=file;
   preview.src=URL.createObjectURL(file);
   preview.hidden=false;
-});
+}
+fileInput.addEventListener("change",()=>chooseFile(fileInput));
+cameraInput.addEventListener("change",()=>chooseFile(cameraInput));
 
 form.addEventListener("submit",async(e)=>{
   e.preventDefault();
-  const file=fileInput.files && fileInput.files[0];
-  if(!file)return;
+  const file=selectedFile;
+  if(!file){statusEl.textContent="اختر صورة من الكاميرا أو الصور أو الملفات أولاً.";return;}
   uploadBtn.disabled=true;
   statusEl.textContent="جارٍ رفع الصورة...";
   try{
@@ -134,6 +145,7 @@ form.addEventListener("submit",async(e)=>{
 
     statusEl.textContent="تمت إضافة المنتج بنجاح ✓";
     form.reset();
+    selectedFile=null;
     preview.hidden=true;
     await loadUploadedProducts();
   }catch(err){
