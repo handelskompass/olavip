@@ -104,6 +104,7 @@
 <section class="section-head" id="products">
 <div><p class="eyebrow">المنتجات</p><h2>مجموعة OLAVIP</h2></div><span>23 منتج</span>
 </section>
+<p id="photoManageStatus" class="muted" role="status" aria-live="polite" hidden></p>
 <section class="grid"><article class="card"><img loading="lazy" src="./IMG-20261005-WA0003.jpg" alt="OLAVIP 1"><div class="card-body"><h3>OLAVIP 01</h3><div class="meta">OLAVIP Collection</div><div class="price">السعر عند الطلب</div></div></article>
 <article class="card"><img loading="lazy" src="./IMG-20261005-WA0004.jpg" alt="OLAVIP 2"><div class="card-body"><h3>OLAVIP 02</h3><div class="meta">OLAVIP Collection</div><div class="price">السعر عند الطلب</div></div></article>
 <article class="card"><img loading="lazy" src="./IMG-20261005-WA0005.jpg" alt="OLAVIP 3"><div class="card-body"><h3>OLAVIP 03</h3><div class="meta">OLAVIP Collection</div><div class="price">السعر عند الطلب</div></div></article>
@@ -162,8 +163,116 @@ const preview=document.getElementById("previewImage");
 const form=document.getElementById("uploadForm");
 const statusEl=document.getElementById("uploadStatus");
 const uploadBtn=document.getElementById("uploadButton");
+const photoManageStatus=document.getElementById("photoManageStatus");
+const productGrid=document.querySelector(".grid");
+let isAdminUser=false;
+let hiddenStaticPhotos=new Set();
+
+function updateGalleryCount(){
+  const count=[...productGrid.querySelectorAll(".card")].filter(el=>!el.hidden).length;
+  const span=document.querySelector(".section-head span");
+  if(span)span.textContent=count+" منتج";
+}
+function refreshPhotoControls(){
+  productGrid.querySelectorAll(".card").forEach(card=>{
+    let button=card.querySelector(".photo-delete-btn");
+    if(!isAdminUser){
+      if(button)button.remove();
+      return;
+    }
+    if(!button){
+      button=document.createElement("button");
+      button.type="button";
+      button.className="photo-delete-btn";
+      const body=card.querySelector(".card-body");
+      if(body)body.appendChild(button);
+    }
+    button.textContent=card.classList.contains("uploaded-card")?"حذف الصورة والمنتج":"إخفاء الصورة من المعرض";
+  });
+  updateGalleryCount();
+}
+async function loadHiddenPhotos(){
+  try{
+    const r=await fetch(SUPABASE_URL+"/rest/v1/olavip_hidden_photos?select=filename",{
+      headers:{"apikey":SUPABASE_KEY}
+    });
+    if(!r.ok)throw Error("تعذر تحميل الصور المخفية");
+    const records=await r.json();
+    hiddenStaticPhotos=new Set(records.map(x=>x.filename));
+    productGrid.querySelectorAll(".card:not(.uploaded-card)").forEach(card=>{
+      const file=card.querySelector("img")?.getAttribute("src")?.split("/").pop();
+      card.hidden=hiddenStaticPhotos.has(file);
+    });
+    const hero=document.querySelector(".hero-card img");
+    if(hero){
+      const heroFilename=hero.getAttribute("src")?.split("/").pop();
+      if(hiddenStaticPhotos.has(heroFilename)){
+        const replacement=productGrid.querySelector(".card:not([hidden]) img");
+        if(replacement)hero.src=replacement.getAttribute("src");
+        else hero.closest(".hero-card").hidden=true;
+      }
+    }
+    updateGalleryCount();
+  }catch(err){console.error("Hidden photos:",err);}
+}
+productGrid.addEventListener("click",async e=>{
+  const btn=e.target.closest(".photo-delete-btn");
+  if(!btn||!isAdminUser)return;
+  const card=btn.closest(".card");
+  if(!card||!(await validateAdmin()))return;
+  const uploaded=card.classList.contains("uploaded-card");
+  const question=uploaded
+    ?"هل تريد حذف الصورة والمنتج نهائياً؟ لا يمكن التراجع عن الحذف."
+    :"هل تريد إخفاء هذه الصورة من معرض OLAVIP؟ سيبقى ملفها الأصلي محفوظاً في GitHub.";
+  if(!window.confirm(question))return;
+  btn.disabled=true;
+  photoManageStatus.hidden=false;
+  photoManageStatus.textContent="جارٍ تنفيذ الطلب...";
+  try{
+    const headers={"apikey":SUPABASE_KEY,"Authorization":"Bearer "+accessToken};
+    if(uploaded){
+      const id=card.dataset.productId;
+      if(!/^[0-9a-f-]{36}$/i.test(id||""))throw Error("معرّف المنتج غير صالح.");
+      const del=await fetch(SUPABASE_URL+"/rest/v1/olavip_products?id=eq."+encodeURIComponent(id),{
+        method:"DELETE",headers:{...headers,"Prefer":"return=representation"}
+      });
+      if(!del.ok)throw Error("تعذر حذف المنتج. تحقق من صلاحيات الإدارة.");
+      const deleted=await del.json();
+      if(!deleted.length)throw Error("لم يُحذف أي منتج.");
+      const imageUrl=card.querySelector("img")?.getAttribute("src")||"";
+      const prefix=SUPABASE_URL+"/storage/v1/object/public/olavip-products/";
+      if(imageUrl.startsWith(prefix)){
+        const storagePath=imageUrl.slice(prefix.length).split("?")[0];
+        const storageDel=await fetch(SUPABASE_URL+"/storage/v1/object/olavip-products/"+storagePath,{
+          method:"DELETE",headers
+        });
+        if(!storageDel.ok){
+          photoManageStatus.textContent="حُذف المنتج من المعرض، لكن بقي ملف الصورة في التخزين.";
+          card.remove();updateGalleryCount();return;
+        }
+      }
+      card.remove();
+      photoManageStatus.textContent="تم حذف الصورة والمنتج بنجاح.";
+    }else{
+      const filename=card.querySelector("img")?.getAttribute("src")?.split("/").pop();
+      if(!/^IMG-20261005-WA[0-9]{4}\.jpg$/.test(filename||""))throw Error("اسم الصورة غير صالح.");
+      const r=await fetch(SUPABASE_URL+"/rest/v1/olavip_hidden_photos",{
+        method:"POST",headers:{...headers,"Content-Type":"application/json","Prefer":"resolution=ignore-duplicates"},
+        body:JSON.stringify({filename})
+      });
+      if(!r.ok)throw Error("تعذر إخفاء الصورة.");
+      hiddenStaticPhotos.add(filename);
+      card.hidden=true;
+      await loadHiddenPhotos();
+      photoManageStatus.textContent="تم إخفاء الصورة من المعرض. ملفها الأصلي لا يزال في GitHub.";
+    }
+  }catch(err){photoManageStatus.textContent=err.message||"تعذر تنفيذ العملية.";}
+  finally{btn.disabled=false;}
+});
 
 function setAdminUI(isAdmin){
+  isAdminUser=isAdmin;
+  refreshPhotoControls();
   uploadPanel.hidden=!isAdmin;
   adminLogin.hidden=isAdmin;
 }
@@ -404,6 +513,7 @@ async function loadUploadedProducts(){
     rows.forEach(p=>{
       const a=document.createElement("article");
       a.className="card uploaded-card";
+      a.dataset.productId=p.id;
       a.dataset.category=p.category;
       a.innerHTML='<img loading="lazy" src="'+p.image_url+'" alt=""><div class="card-body"><h3></h3><div class="meta"></div><div class="price">السعر عند الطلب</div></div>';
       a.querySelector("h3").textContent=p.title;
@@ -411,8 +521,10 @@ async function loadUploadedProducts(){
       a.querySelector(".meta").textContent=names[p.category]||p.category;
       grid.prepend(a);
     });
+    refreshPhotoControls();
   }catch(e){}
 }
+loadHiddenPhotos();
 loadUploadedProducts();
 processRecoveryLink().then(active=>{if(!active)validateAdmin();});
 </script>
