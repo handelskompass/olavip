@@ -44,8 +44,26 @@
     <div class="admin-actions">
       <button class="cta" type="submit">تسجيل الدخول</button>
       <button class="secondary-btn" id="adminSignupButton" type="button">إنشاء الحساب لأول مرة</button>
+      <button class="secondary-btn" id="forgotPasswordButton" type="button">نسيت كلمة المرور؟</button>
     </div>
     <p id="adminStatus" class="muted"></p>
+  </form>
+  <form id="resetPasswordForm" hidden>
+    <h3 id="resetHeading">استعادة كلمة المرور</h3>
+    <p id="resetInstructions" class="muted">سنرسل رابط إعادة تعيين كلمة المرور إلى olavip42@gmail.com.</p>
+    <div id="newPasswordFields" hidden>
+      <label>كلمة المرور الجديدة
+        <input id="newAdminPassword" type="password" minlength="8" autocomplete="new-password" placeholder="8 أحرف على الأقل">
+      </label>
+      <label>تأكيد كلمة المرور الجديدة
+        <input id="confirmAdminPassword" type="password" minlength="8" autocomplete="new-password" placeholder="تأكيد كلمة المرور">
+      </label>
+    </div>
+    <div class="admin-actions">
+      <button class="cta" id="resetSubmitButton" type="submit">إرسال رابط الاستعادة</button>
+      <button class="secondary-btn" id="resetCancelButton" type="button">العودة لتسجيل الدخول</button>
+    </div>
+    <p id="resetStatus" class="muted" role="status" aria-live="polite"></p>
   </form>
 </section>
 
@@ -122,6 +140,16 @@ const adminEmail=document.getElementById("adminEmail");
 const adminPassword=document.getElementById("adminPassword");
 const adminStatus=document.getElementById("adminStatus");
 const signupBtn=document.getElementById("adminSignupButton");
+const forgotBtn=document.getElementById("forgotPasswordButton");
+const resetForm=document.getElementById("resetPasswordForm");
+const resetHeading=document.getElementById("resetHeading");
+const resetInstructions=document.getElementById("resetInstructions");
+const resetStatus=document.getElementById("resetStatus");
+const resetSubmitButton=document.getElementById("resetSubmitButton");
+const resetFields=document.getElementById("newPasswordFields");
+const newPassword=document.getElementById("newAdminPassword");
+const confirmPassword=document.getElementById("confirmAdminPassword");
+let recoveryToken="";
 const logoutBtn=document.getElementById("adminLogoutButton");
 const uploadPanel=document.getElementById("add-product");
 
@@ -157,6 +185,98 @@ async function validateAdmin(){
     setAdminUI(false);
     return false;
   }
+}
+
+function openResetForm(isRecovery=false){
+  adminLogin.hidden=false;
+  uploadPanel.hidden=true;
+  adminForm.hidden=true;
+  resetForm.hidden=false;
+  resetFields.hidden=!isRecovery;
+  newPassword.required=isRecovery;
+  confirmPassword.required=isRecovery;
+  resetHeading.textContent=isRecovery?"تعيين كلمة مرور جديدة":"استعادة كلمة المرور";
+  resetInstructions.textContent=isRecovery?"أدخل كلمة المرور الجديدة لحساب الإدارة.":"سنرسل رابط الاستعادة إلى "+ADMIN_EMAIL;
+  resetSubmitButton.textContent=isRecovery?"حفظ كلمة المرور الجديدة":"إرسال رابط الاستعادة";
+  resetStatus.textContent="";
+  adminLogin.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+forgotBtn.addEventListener("click",()=>openResetForm(false));
+document.getElementById("resetCancelButton").addEventListener("click",()=>{
+  recoveryToken="";
+  resetForm.hidden=true;
+  adminForm.hidden=false;
+  newPassword.value="";
+  confirmPassword.value="";
+  history.replaceState(null,"",location.pathname+location.search);
+  validateAdmin();
+});
+
+resetForm.addEventListener("submit",async e=>{
+  e.preventDefault();
+  resetSubmitButton.disabled=true;
+  resetStatus.textContent=recoveryToken?"جارٍ تحديث كلمة المرور...":"جارٍ إرسال رابط الاستعادة...";
+  try{
+    if(!recoveryToken){
+      const redirect=location.origin+location.pathname;
+      const r=await fetch(SUPABASE_URL+"/auth/v1/recover?redirect_to="+encodeURIComponent(redirect),{
+        method:"POST",headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+        body:JSON.stringify({email:ADMIN_EMAIL})
+      });
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error(d.msg||d.error_description||d.message||"تعذّر إرسال البريد");
+      resetStatus.textContent="إذا كان حساب الإدارة مسجلاً، فسيصل رابط إعادة التعيين إلى "+ADMIN_EMAIL+". تحقق من البريد والرسائل غير المرغوبة.";
+    }else{
+      if(newPassword.value.length<8)throw Error("كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل.");
+      if(newPassword.value!==confirmPassword.value)throw Error("كلمتا المرور غير متطابقتين.");
+      const r=await fetch(SUPABASE_URL+"/auth/v1/user",{
+        method:"PUT",
+        headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+recoveryToken,"Content-Type":"application/json"},
+        body:JSON.stringify({password:newPassword.value})
+      });
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error(d.msg||d.error_description||d.message||"تعذر تحديث كلمة المرور");
+      try{await fetch(SUPABASE_URL+"/auth/v1/logout",{method:"POST",headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+recoveryToken}});}catch(e){}
+      recoveryToken="";
+      accessToken="";
+      localStorage.removeItem("olavip_admin_access_token");
+      newPassword.value="";
+      confirmPassword.value="";
+      history.replaceState(null,"",location.pathname+location.search);
+      resetForm.hidden=true;
+      adminForm.hidden=false;
+      setAdminUI(false);
+      adminStatus.textContent="تم تغيير كلمة المرور بنجاح. سجل الدخول بكلمة المرور الجديدة.";
+    }
+  }catch(err){resetStatus.textContent=err.message||"حدث خطأ، حاول مجدداً.";}
+  finally{resetSubmitButton.disabled=false;}
+});
+
+async function processRecoveryLink(){
+  const hash=new URLSearchParams(location.hash.slice(1));
+  if(hash.get("type")!=="recovery")return false;
+  const token=hash.get("access_token");
+  const error=hash.get("error_description")||hash.get("error");
+  history.replaceState(null,"",location.pathname+location.search);
+  openResetForm(true);
+  if(error||!token){
+    resetStatus.textContent=error||"رابط الاستعادة غير صالح أو منتهي الصلاحية. اطلب رابطاً جديداً.";
+    resetFields.hidden=true;
+    resetSubmitButton.disabled=true;
+    return true;
+  }
+  try{
+    const r=await fetch(SUPABASE_URL+"/auth/v1/user",{headers:{"apikey":SUPABASE_KEY,"Authorization":"Bearer "+token}});
+    const user=await r.json();
+    if(!r.ok||(user.email||"").toLowerCase()!==ADMIN_EMAIL)throw Error("رابط الاستعادة غير صالح لحساب الإدارة.");
+    recoveryToken=token;
+  }catch(err){
+    resetStatus.textContent=err.message||"انتهت صلاحية الرابط. اطلب رابطاً جديداً.";
+    resetFields.hidden=true;
+    resetSubmitButton.disabled=true;
+  }
+  return true;
 }
 
 adminForm.addEventListener("submit",async(e)=>{
@@ -293,7 +413,7 @@ async function loadUploadedProducts(){
   }catch(e){}
 }
 loadUploadedProducts();
-validateAdmin();
+processRecoveryLink().then(active=>{if(!active)validateAdmin();});
 </script>
 <script>
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js"))}
